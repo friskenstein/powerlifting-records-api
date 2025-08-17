@@ -141,6 +141,7 @@ fn generate_keys() -> Vec<String> {
     }
 
     // Sort to mimic TS behavior
+    // functionally unnecessary here but considering future custom in-memory data structure
     records.sort_by(|a, b| {
         let a_parts: Vec<&str> = a.split('|').collect();
         let b_parts: Vec<&str> = b.split('|').collect();
