@@ -18,7 +18,8 @@ async fn main() {
     build::build_records(&csv_dir);
 
     let app = Router::new()
-        .route("/records", get(api::get_records));
+        .route("/records", get(api::get_records))
+        .route("/errors", get(api::get_errors));
 
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();

@@ -43,3 +43,26 @@ pub async fn get_records(Query(query): Query<RecordQuery>) -> Json<Vec<serde_jso
 
     Json(rows.filter_map(Result::ok).collect())
 }
+
+pub async fn get_errors() -> Json<Vec<serde_json::Value>> {
+    let conn = DB.lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT file, line, key, weight, name, date, place, reason FROM Errors ORDER BY file, line")
+        .unwrap();
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "file": row.get::<_, String>(0)?,
+                "line": row.get::<_, i64>(1)?,
+                "key": row.get::<_, Option<String>>(2)?,
+                "weight": row.get::<_, Option<f64>>(3)?,
+                "name": row.get::<_, Option<String>>(4)?,
+                "date": row.get::<_, Option<String>>(5)?,
+                "place": row.get::<_, Option<String>>(6)?,
+                "reason": row.get::<_, String>(7)?,
+            }))
+        })
+        .unwrap();
+
+    Json(rows.filter_map(Result::ok).collect())
+}

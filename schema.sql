@@ -14,3 +14,16 @@ create table Records (
 
 	unique(sex, div, event, equip, class, lift)
 );
+
+-- Build-time errors captured while parsing CSVs
+create table Errors (
+    id integer primary key,
+    file  text not null,
+    line  integer not null,
+    key   text,
+    weight real,
+    name  text,
+    date  text,
+    place text,
+    reason text not null
+);

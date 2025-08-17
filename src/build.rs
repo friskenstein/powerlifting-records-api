@@ -6,6 +6,7 @@ use rusqlite::params;
 pub fn build_records(dir_path: &str) {
     let conn = DB.lock().unwrap();
     conn.execute("DELETE FROM Records;", []).unwrap();
+    conn.execute("DELETE FROM Errors;", []).unwrap();
 
     let keys = generate_keys();
     for key in &keys {
@@ -16,11 +17,22 @@ pub fn build_records(dir_path: &str) {
         ).ok(); // skip duplicates
     }
 
-    let paths = fs::read_dir(Path::new(dir_path)).unwrap();
+    // Collect and sort CSV files lexicographically to ensure chronological processing
+    let mut files: Vec<_> = fs::read_dir(Path::new(dir_path))
+        .unwrap()
+        .flatten()
+        .filter(|f| f.path().extension().map(|e| e == "csv").unwrap_or(false))
+        .collect();
+    files.sort_by_key(|f| f.file_name());
 
-    for file in paths.flatten().filter(|f| f.path().extension().map(|e| e == "csv").unwrap_or(false)) {
+    for file in files {
+        let file_name = file
+            .file_name()
+            .to_string_lossy()
+            .to_string();
+
         if let Ok(content) = fs::read_to_string(file.path()) {
-            for line in content.lines() {
+            for (idx, line) in content.lines().enumerate() {
                 if line.trim().is_empty() || line.starts_with('#') {
                     continue;
                 }
@@ -39,6 +51,17 @@ pub fn build_records(dir_path: &str) {
 
                 let key_parts: Vec<&str> = key.split('|').collect();
                 if key_parts.len() != 6 {
+                    log_error(
+                        &conn,
+                        &file_name,
+                        (idx + 1) as i64,
+                        key,
+                        weight,
+                        name,
+                        date,
+                        place,
+                        "invalid key format",
+                    );
                     continue;
                 }
 
@@ -51,14 +74,40 @@ pub fn build_records(dir_path: &str) {
                 let w: f64 = weight.parse().unwrap_or(0.0);
                 if let Some(old_weight) = old {
                     if old_weight >= w {
+                        log_error(
+                            &conn,
+                            &file_name,
+                            (idx + 1) as i64,
+                            key,
+                            weight,
+                            name,
+                            date,
+                            place,
+                            "not higher than previous",
+                        );
                         continue;
                     }
                 }
 
-                conn.execute(
+                let updated = conn.execute(
                     "UPDATE Records SET weight = ?, name = ?, date = ?, place = ? WHERE sex = ? AND div = ? AND event = ? AND equip = ? AND class = ? AND lift = ?",
                     params![w, name.as_str(), date.as_str(), place.as_str(), key_parts[0], key_parts[1], key_parts[2], key_parts[3], key_parts[4], key_parts[5]],
-                ).ok();
+                ).unwrap_or(0);
+
+                if updated == 0 {
+                    // No matching key in Records -> invalid key combination
+                    log_error(
+                        &conn,
+                        &file_name,
+                        (idx + 1) as i64,
+                        key,
+                        weight,
+                        name,
+                        date,
+                        place,
+                        "invalid key (no matching record)",
+                    );
+                }
             }
         }
     }
@@ -83,6 +132,24 @@ fn parse_csv_line(line: &str) -> Vec<String> {
     parts
 }
 
+
+fn log_error(
+    conn: &rusqlite::Connection,
+    file: &str,
+    line: i64,
+    key: &str,
+    weight: &str,
+    name: &str,
+    date: &str,
+    place: &str,
+    reason: &str,
+) {
+    let w = weight.parse::<f64>().ok();
+    let _ = conn.execute(
+        "INSERT INTO Errors (file, line, key, weight, name, date, place, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        params![file, line, key, w, name, date, place, reason],
+    );
+}
 
 fn generate_keys() -> Vec<String> {
     let sexes = ["M", "F"];
