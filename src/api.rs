@@ -1,13 +1,14 @@
 use axum::{extract::Query, response::Json};
 use crate::db::DB;
 use rusqlite::params_from_iter;
+use std::env;
 use std::collections::HashSet;
 
 // We decode the query as a flat list of key/value pairs to allow
 // repeated parameters like `class=100&class=110` without deserialization errors.
 type QueryPairs = Vec<(String, String)>;
 
-pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json::Value>> {
+pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<serde_json::Value> {
 	let conn = DB.lock().unwrap();
 	let mut sql = String::from("SELECT * FROM Records WHERE 1=1");
 	let mut params_vec: Vec<String> = vec![];
@@ -29,6 +30,7 @@ pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json
 	let mut equips: Vec<String> = vec![];
 	let mut classes: Vec<String> = vec![];
 	let mut lifts: Vec<String> = vec![];
+	let mut page_param: Option<usize> = None;
 
 	for (k, v) in pairs.into_iter() {
 		match k.as_str() {
@@ -38,6 +40,7 @@ pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json
 			"equip" => equips.push(v),
 			"class" => classes.push(v),
 			"lift" => lifts.push(v),
+			"page" => { if page_param.is_none() { page_param = v.parse::<usize>().ok(); } },
 			_ => {},
 		}
 	}
@@ -77,6 +80,17 @@ pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json
 	add_in_clause(&mut sql, &mut params_vec, "class", &classes);
 	add_in_clause(&mut sql, &mut params_vec, "lift", &lifts);
 
+	// Compute total count before ORDER BY/LIMIT/OFFSET
+	let count_sql = sql.replacen("SELECT *", "SELECT COUNT(*)", 1);
+	let count_params = params_vec.clone();
+	let mut count_stmt = conn.prepare(&count_sql).unwrap();
+	let total: i64 = count_stmt.query_row(params_from_iter(count_params), |row| row.get(0)).unwrap_or(0);
+
+	// Pagination
+	let per_page: usize = env::var("PAGE_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(20).max(1);
+	let page_index: usize = page_param.unwrap_or(1).max(1);
+	let offset: usize = per_page.saturating_mul(page_index.saturating_sub(1));
+
 	// Apply deterministic ordering per requested preference:
 	// equipment (custom), weight class (numeric with SHW last), division (alpha), event (custom), lift (custom)
 	sql.push_str(
@@ -108,6 +122,9 @@ pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json
 		END"
 	);
 
+	// Apply LIMIT/OFFSET (safe to inline parsed numbers)
+	sql.push_str(&format!(" LIMIT {} OFFSET {}", per_page, offset));
+
 	let mut stmt = conn.prepare(&sql).unwrap();
 	let rows = stmt.query_map(params_from_iter(params_vec), |row| {
 		Ok(serde_json::json!({
@@ -124,7 +141,19 @@ pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json
 		}))
 	}).unwrap();
 
-	Json(rows.filter_map(Result::ok).collect())
+	let data: Vec<serde_json::Value> = rows.filter_map(Result::ok).collect();
+	let current_page = page_index as i64;
+	let total_pages = ((total as usize + per_page - 1) / per_page) as i64;
+
+	Json(serde_json::json!({
+		"data": data,
+		"meta": {
+			"total": total,
+			"per_page": per_page,
+			"total_pages": total_pages,
+			"page": current_page,
+		}
+	}))
 }
 
 pub async fn get_errors() -> Json<Vec<serde_json::Value>> {
