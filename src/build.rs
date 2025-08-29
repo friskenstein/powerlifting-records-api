@@ -173,20 +173,7 @@ fn generate_keys() -> Vec<String> {
         "Single-ply" => 1,
         "Multi-ply" => 2,
         "Unlimited" => 3,
-        _ => 3,
-    };
-    let li_order = |li: &str| match li {
-        "S" => 0,
-        "B" => 1,
-        "D" => 2,
-        "SBD" => 3,
-        _ => 3,
-    };
-    let ev_order = |ev: &str| match ev {
-        "SBD" => 0,
-        "B" => 1,
-        "D" => 2,
-        _ => 3,
+        _ => 4,
     };
 
     let mut records = vec![];

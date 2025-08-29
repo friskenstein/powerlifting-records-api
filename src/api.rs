@@ -1,47 +1,101 @@
 use axum::{extract::Query, response::Json};
-use serde::Deserialize;
 use crate::db::DB;
 use rusqlite::params_from_iter;
 
-#[derive(Deserialize)]
-pub struct RecordQuery {
-    sex: Option<String>,
-    div: Option<String>,
-    event: Option<String>,
-    equip: Option<String>,
-    class: Option<String>,
-    lift: Option<String>,
-}
+// We decode the query as a flat list of key/value pairs to allow
+// repeated parameters like `class=100&class=110` without deserialization errors.
+type QueryPairs = Vec<(String, String)>;
 
-pub async fn get_records(Query(query): Query<RecordQuery>) -> Json<Vec<serde_json::Value>> {
-    let conn = DB.lock().unwrap();
-    let mut sql = String::from("SELECT * FROM Records WHERE 1=1");
-    let mut params_vec = vec![];
+pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json::Value>> {
+	let conn = DB.lock().unwrap();
+	let mut sql = String::from("SELECT * FROM Records WHERE 1=1");
+	let mut params_vec: Vec<String> = vec![];
 
-    if let Some(v) = &query.sex   { sql.push_str(" AND sex = ?");   params_vec.push(v); }
-    if let Some(v) = &query.div   { sql.push_str(" AND div = ?");   params_vec.push(v); }
-    if let Some(v) = &query.event { sql.push_str(" AND event = ?"); params_vec.push(v); }
-    if let Some(v) = &query.equip { sql.push_str(" AND equip = ?"); params_vec.push(v); }
-    if let Some(v) = &query.class { sql.push_str(" AND class = ?"); params_vec.push(v); }
-    if let Some(v) = &query.lift  { sql.push_str(" AND lift = ?");  params_vec.push(v); }
+	// Helper to append IN (?) placeholders and extend params
+	fn add_in_clause(sql: &mut String, params_vec: &mut Vec<String>, column: &str, values: &[String]) {
+		if values.is_empty() { return; }
+		sql.push_str(&format!(
+			" AND {column} IN ({})",
+			(0..values.len()).map(|_| "?").collect::<Vec<_>>().join(", ")
+		));
+		params_vec.extend(values.iter().cloned());
+	}
 
-    let mut stmt = conn.prepare(&sql).unwrap();
-    let rows = stmt.query_map(params_from_iter(params_vec), |row| {
-        Ok(serde_json::json!({
-            "sex": row.get::<_, String>(1)?,
-            "div": row.get::<_, String>(2)?,
-            "event": row.get::<_, String>(3)?,
-            "equip": row.get::<_, String>(4)?,
-            "class": row.get::<_, String>(5)?,
-            "lift": row.get::<_, String>(6)?,
-            "weight": row.get::<_, f64>(7)?,
-            "name": row.get::<_, String>(8)?,
-            "date": row.get::<_, String>(9)?,
-            "place": row.get::<_, String>(10)?,
-        }))
-    }).unwrap();
+	// Accumulate filters
+	let mut sexes: Vec<String> = vec![];
+	let mut divs: Vec<String> = vec![];
+	let mut events: Vec<String> = vec![];
+	let mut equips: Vec<String> = vec![];
+	let mut classes: Vec<String> = vec![];
+	let mut lifts: Vec<String> = vec![];
 
-    Json(rows.filter_map(Result::ok).collect())
+	for (k, v) in pairs.into_iter() {
+		match k.as_str() {
+			"sex" => sexes.push(v),
+			"div" => divs.push(v),
+			"event" => events.push(v),
+			"equip" => equips.push(v),
+			"class" => classes.push(v),
+			"lift" => lifts.push(v),
+			_ => {},
+		}
+	}
+
+	add_in_clause(&mut sql, &mut params_vec, "sex", &sexes);
+	add_in_clause(&mut sql, &mut params_vec, "div", &divs);
+	add_in_clause(&mut sql, &mut params_vec, "event", &events);
+	add_in_clause(&mut sql, &mut params_vec, "equip", &equips);
+	add_in_clause(&mut sql, &mut params_vec, "class", &classes);
+	add_in_clause(&mut sql, &mut params_vec, "lift", &lifts);
+
+	// Apply deterministic ordering per requested preference:
+	// equipment (custom), weight class (numeric with SHW last), division (alpha), event (custom), lift (custom)
+	sql.push_str(
+		" ORDER BY \
+		CASE equip \
+			WHEN 'Raw' THEN 0 \
+			WHEN 'Bare' THEN 0 \
+			WHEN 'Sleeves' THEN 0 \
+			WHEN 'Wraps' THEN 0 \
+			WHEN 'Single-ply' THEN 1 \
+			WHEN 'Multi-ply' THEN 2 \
+			WHEN 'Unlimited' THEN 3 \
+			ELSE 4 \
+		END, \
+		CASE WHEN class = 'SHW' THEN 1000 ELSE CAST(class AS REAL) END, \
+		div, \
+		CASE event \
+			WHEN 'SBD' THEN 0 \
+			WHEN 'B' THEN 1 \
+			WHEN 'D' THEN 2 \
+			ELSE 3 \
+		END, \
+		CASE lift \
+			WHEN 'S' THEN 0 \
+			WHEN 'B' THEN 1 \
+			WHEN 'D' THEN 2 \
+			WHEN 'SBD' THEN 3 \
+			ELSE 4 \
+		END"
+	);
+
+	let mut stmt = conn.prepare(&sql).unwrap();
+	let rows = stmt.query_map(params_from_iter(params_vec), |row| {
+		Ok(serde_json::json!({
+			"sex": row.get::<_, String>(1)?,
+			"div": row.get::<_, String>(2)?,
+			"event": row.get::<_, String>(3)?,
+			"equip": row.get::<_, String>(4)?,
+			"class": row.get::<_, String>(5)?,
+			"lift": row.get::<_, String>(6)?,
+			"weight": row.get::<_, f64>(7)?,
+			"name": row.get::<_, Option<String>>(8)?,
+			"date": row.get::<_, Option<String>>(9)?,
+			"place": row.get::<_, Option<String>>(10)?,
+		}))
+	}).unwrap();
+
+	Json(rows.filter_map(Result::ok).collect())
 }
 
 pub async fn get_errors() -> Json<Vec<serde_json::Value>> {
