@@ -1,6 +1,7 @@
 use axum::{extract::Query, response::Json};
 use crate::db::DB;
 use rusqlite::params_from_iter;
+use std::collections::HashSet;
 
 // We decode the query as a flat list of key/value pairs to allow
 // repeated parameters like `class=100&class=110` without deserialization errors.
@@ -40,6 +41,34 @@ pub async fn get_records(Query(pairs): Query<QueryPairs>) -> Json<Vec<serde_json
 			_ => {},
 		}
 	}
+
+	// Expand Raw <-> Bare/Sleeves/Wraps semantics
+	let has_raw = equips.iter().any(|e| e == "Raw");
+	let has_any_bsw = equips.iter().any(|e| matches!(e.as_str(), "Bare" | "Sleeves" | "Wraps"));
+	if has_raw {
+		for e in ["Bare", "Sleeves", "Wraps"] {
+			if !equips.iter().any(|x| x == e) {
+				equips.push(e.to_string());
+			}
+		}
+	} else if has_any_bsw {
+		// One or more of Bare/Sleeves/Wraps requested -> include Raw too
+		equips.push("Raw".to_string());
+	}
+
+	// De-duplicate while preserving order
+	let mut seen = HashSet::new();
+	sexes.retain(|s| seen.insert(s.clone()));
+	seen.clear();
+	divs.retain(|s| seen.insert(s.clone()));
+	seen.clear();
+	events.retain(|s| seen.insert(s.clone()));
+	seen.clear();
+	equips.retain(|s| seen.insert(s.clone()));
+	seen.clear();
+	classes.retain(|s| seen.insert(s.clone()));
+	seen.clear();
+	lifts.retain(|s| seen.insert(s.clone()));
 
 	add_in_clause(&mut sql, &mut params_vec, "sex", &sexes);
 	add_in_clause(&mut sql, &mut params_vec, "div", &divs);
