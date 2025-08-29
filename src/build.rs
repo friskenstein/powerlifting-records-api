@@ -166,12 +166,26 @@ fn generate_keys() -> Vec<String> {
 
     let lifts = ["S", "B", "D", "SBD"];
     let events = ["SBD", "B", "D"];
-    let equipment = ["Raw", "Wraps", "Sleeves", "Bare", "Single-ply", "Multi-ply"];
+    let equipment = ["Raw", "Wraps", "Sleeves", "Bare", "Single-ply", "Multi-ply", "Unlimited"];
 
     let eq_order = |eq: &str| match eq {
         "Raw" | "Bare" | "Sleeves" | "Wraps" => 0,
         "Single-ply" => 1,
         "Multi-ply" => 2,
+        "Unlimited" => 3,
+        _ => 3,
+    };
+    let li_order = |li: &str| match li {
+        "S" => 0,
+        "B" => 1,
+        "D" => 2,
+        "SBD" => 3,
+        _ => 3,
+    };
+    let ev_order = |ev: &str| match ev {
+        "SBD" => 0,
+        "B" => 1,
+        "D" => 2,
         _ => 3,
     };
 
@@ -193,8 +207,10 @@ fn generate_keys() -> Vec<String> {
                     for eq in &equipment {
                         let invalid_bench_dead_eq = (*lift == "B" || *lift == "D") && (*eq == "Bare" || *eq == "Sleeves" || *eq == "Wraps");
                         let invalid_squat_total_eq = (*lift == "S" || *lift == "SBD") && (*eq == "Raw");
+                        // Unlimited is only valid for bench only
+                        let unlimited = (*eq == "Unlimited") && (*event != "B");
 
-                        if invalid_bench_dead_eq || invalid_squat_total_eq {
+                        if invalid_bench_dead_eq || invalid_squat_total_eq || unlimited {
                             continue;
                         }
 
