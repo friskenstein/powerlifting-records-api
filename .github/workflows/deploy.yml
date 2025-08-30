@@ -10,6 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cache host-side cargo & target (mounted into the container below)
       - uses: actions/cache@v4
         with:
           path: |
@@ -17,17 +18,29 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      - uses: actions-rs/toolchain@v1
+      - name: Build on Debian 11 (glibc 2.31)
+        uses: addnab/docker-run-action@v3
         with:
-          toolchain: stable
-          override: true
-
-      - name: Build release
-        run: |
-          cargo build --release
-          strip target/release/powerlifting-records-api
-          cp target/release/powerlifting-records-api records-api
+          image: debian:bullseye
+          options: >-
+            -v ${{ github.workspace }}:/w
+            -v /home/runner/.cargo:/root/.cargo
+            -v ${{ github.workspace }}/target:/w/target
+            -w /w
+          run: |
+            set -eux
+            apt-get update
+            apt-get install -y curl build-essential pkg-config ca-certificates git binutils
+            # If you need OpenSSL at runtime, also: apt-get install -y libssl-dev
+            curl -sSf https://sh.rustup.rs | sh -s -- -y
+            . $HOME/.cargo/env
+            rustup default stable
+            cargo build --release --package powerlifting-records-api --bin powerlifting-records-api
+            cp target/release/powerlifting-records-api records-api
+            strip records-api
 
       - uses: actions/upload-artifact@v4
         with:
@@ -57,8 +70,8 @@ jobs:
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
             set -euo pipefail
             ts=$(date +%Y%m%d%H%M%S)
-            sudo install -o records-api -g records-api -m 0750 /tmp/records-api.new /opt/records-api/releases/records-api-$ts
-            sudo ln -sfn ../releases/records-api-$ts /opt/records-api/bin/current
-            sudo systemctl restart records-api
+            sudo -n install -o records-api -g records-api -m 0750 /tmp/records-api.new /opt/records-api/releases/records-api-$ts
+            sudo -n ln -sfn ../releases/records-api-$ts /opt/records-api/bin/current
+            sudo -n systemctl restart records-api
             rm -f /tmp/records-api.new
           '
