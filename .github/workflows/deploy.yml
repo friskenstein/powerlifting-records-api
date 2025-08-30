@@ -1,0 +1,64 @@
+name: Build & Deploy
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Build release
+        run: |
+          cargo build --release
+          strip target/release/powerlifting-records-api
+          cp target/release/powerlifting-records-api records-api
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: records-api
+          path: records-api
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: records-api
+          path: .
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Copy binary to server
+        run: |
+          scp -o StrictHostKeyChecking=accept-new ./records-api \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/records-api.new
+
+      - name: Activate release atomically
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+            set -euo pipefail
+            ts=$(date +%Y%m%d%H%M%S)
+            sudo install -o records-api -g records-api -m 0750 /tmp/records-api.new /opt/records-api/releases/records-api-$ts
+            sudo ln -sfn ../releases/records-api-$ts /opt/records-api/bin/current
+            sudo systemctl restart records-api
+            rm -f /tmp/records-api.new
+          '
