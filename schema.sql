@@ -17,13 +17,13 @@ create table Records (
 
 -- Build-time errors captured while parsing CSVs
 create table Errors (
-    id integer primary key,
-    file  text not null,
-    line  integer not null,
-    key   text,
+    id     integer primary key,
+    file   text not null,
+    line   integer not null,
+    "key"  text,
     weight real,
-    name  text,
-    date  text,
-    place text,
+    name   text,
+    date   text,
+    place  text,
     reason text not null
 );

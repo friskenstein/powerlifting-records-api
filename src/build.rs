@@ -155,7 +155,6 @@ fn generate_keys() -> Vec<String> {
     let sexes = ["M", "F"];
     let male_weight_classes = ["52", "56", "60", "67.5", "75", "82.5", "90", "100", "110", "125", "140", "SHW"];
     let female_weight_classes = ["44", "48", "52", "56", "60", "67.5", "75", "82.5", "90", "100", "110", "SHW"];
-    let classes: Vec<&str> = male_weight_classes.iter().chain(female_weight_classes.iter()).copied().collect();
 
     let base_divisions = ["Open", "Youth", "T13-15", "T16-17", "T18-19", "J20-23", "M40-44", "M45-49", "M50-54", "M55-59", "M60-64", "M65-69", "M70-74", "M75-79", "M80+"];
     let mut divisions: Vec<String> = vec![];
@@ -167,14 +166,6 @@ fn generate_keys() -> Vec<String> {
     let lifts = ["S", "B", "D", "SBD"];
     let events = ["SBD", "B", "D"];
     let equipment = ["Raw", "Wraps", "Sleeves", "Bare", "Single-ply", "Multi-ply", "Unlimited"];
-
-    let eq_order = |eq: &str| match eq {
-        "Raw" | "Bare" | "Sleeves" | "Wraps" => 0,
-        "Single-ply" => 1,
-        "Multi-ply" => 2,
-        "Unlimited" => 3,
-        _ => 4,
-    };
 
     let mut records = vec![];
 
@@ -209,21 +200,6 @@ fn generate_keys() -> Vec<String> {
             }
         }
     }
-
-    // Sort to mimic TS behavior
-    // functionally unnecessary here but considering future custom in-memory data structure
-    records.sort_by(|a, b| {
-        let a_parts: Vec<&str> = a.split('|').collect();
-        let b_parts: Vec<&str> = b.split('|').collect();
-
-        let eq_cmp = eq_order(a_parts[3]).cmp(&eq_order(b_parts[3]));
-        if eq_cmp != std::cmp::Ordering::Equal {
-            return eq_cmp;
-        }
-
-        let class_idx = |c: &str| classes.iter().position(|x| *x == c).unwrap_or(999);
-        class_idx(a_parts[4]).cmp(&class_idx(b_parts[4]))
-    });
 
     records
 }

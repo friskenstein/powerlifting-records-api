@@ -7,8 +7,6 @@ mod api;
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
-
     let csv_dir = env::var("CSV_DIR").expect("CSV_DIR is not set in .env");
     let port: u16 = env::var("PORT")
         .unwrap_or_else(|_| "3000".to_string())
